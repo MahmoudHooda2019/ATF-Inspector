@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ATF Inspector — Adobe Texture Format reader</title>
+<style>
+  :root{
+    --bg:#0A0D12;
+    --panel:#11161D;
+    --line:#232B36;
+    --text:#D8DEE6;
+    --text-dim:#7E8B9B;
+    --amber:#E8A33D;
+    --amber-dim:#8a6526;
+    --violet:#8C7BFF;
+    --green:#6FCF97;
+    --red:#E2615A;
+    --mono: "SF Mono","JetBrains Mono","IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+    --sans: -apple-system,"Segoe UI",ui-sans-serif,Inter,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1100px;margin:0 auto;padding:28px 20px 80px;}
+
+  header.top{
+    display:flex; justify-content:space-between; align-items:flex-end;
+    border-bottom:1px solid var(--line); padding-bottom:18px; margin-bottom:28px;
+    flex-wrap:wrap; gap:10px;
+  }
+  .brand{display:flex; flex-direction:column; gap:4px;}
+  .brand .mark{ font-family:var(--mono); font-size:13px; letter-spacing:.12em; color:var(--amber); text-transform:uppercase; }
+  .brand h1{ margin:0; font-size:22px; font-weight:600; letter-spacing:-.01em; }
+  .eyebrow{ font-family:var(--mono); font-size:11px; letter-spacing:.14em; color:var(--text-dim); text-transform:uppercase; }
+
+  .dropzone{
+    position:relative; border:1px dashed var(--line); border-radius:2px; padding:48px 20px;
+    text-align:center; cursor:pointer; background:var(--panel);
+    transition:border-color .15s ease, background .15s ease;
+  }
+  .dropzone:hover, .dropzone:focus-visible{ border-color:var(--amber-dim); outline:none; }
+  .dropzone.drag{ border-color:var(--amber); background:#151A22; }
+  .dropzone .corner{ position:absolute; width:18px; height:18px; border:2px solid var(--amber); opacity:.7; }
+  .corner.tl{top:10px;left:10px;border-right:none;border-bottom:none;}
+  .corner.tr{top:10px;right:10px;border-left:none;border-bottom:none;}
+  .corner.bl{bottom:10px;left:10px;border-right:none;border-top:none;}
+  .corner.br{bottom:10px;right:10px;border-left:none;border-top:none;}
+  .dz-label{ font-family:var(--mono); font-size:13px; letter-spacing:.1em; text-transform:uppercase; color:var(--text); }
+  .dz-sub{font-size:13px; color:var(--text-dim); margin-top:8px;}
+  input[type=file]{ position:absolute; width:1px; height:1px; opacity:0; }
+
+  .filebar{
+    display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    margin-top:18px; padding:10px 14px; background:var(--panel); border:1px solid var(--line);
+    font-family:var(--mono); font-size:12px; color:var(--text-dim);
+  }
+  .filebar strong{color:var(--text); font-weight:500;}
+  .filebar .files{display:flex; flex-direction:column; gap:3px;}
+  .btn{
+    font-family:var(--mono); font-size:12px; letter-spacing:.04em; text-transform:uppercase;
+    background:transparent; color:var(--amber); border:1px solid var(--amber-dim);
+    padding:6px 12px; cursor:pointer; border-radius:2px;
+  }
+  .btn:hover{background:rgba(232,163,61,.08);}
+  .btn:focus-visible{outline:2px solid var(--amber); outline-offset:2px;}
+  .btn:disabled{opacity:.35; cursor:not-allowed;}
+  .btn.ghost{color:var(--text-dim); border-color:var(--line);}
+  .btn.small{padding:4px 9px; font-size:11px;}
+
+  .error{
+    margin-top:14px; padding:12px 14px; background:rgba(226,97,90,.08); border:1px solid rgba(226,97,90,.4);
+    color:#F2A8A3; font-size:13px; border-radius:2px; line-height:1.5;
+  }
+  .xmlrow{
+    display:flex; align-items:center; gap:10px; margin-top:10px; flex-wrap:wrap;
+    font-family:var(--mono); font-size:12px; color:var(--text-dim);
+  }
+  .xmlrow label.filelabel{
+    border:1px solid var(--line); padding:5px 10px; border-radius:2px; cursor:pointer; color:var(--text);
+  }
+  .xmlrow label.filelabel:hover{ border-color:var(--amber-dim); }
+
+  .grid{ display:grid; grid-template-columns: 1.1fr 1fr; gap:18px; margin-top:24px; }
+  @media (max-width: 760px){ .grid{grid-template-columns:1fr;} }
+
+  .panel{ background:var(--panel); border:1px solid var(--line); border-radius:2px; padding:18px; margin-top:18px; }
+  .grid .panel{ margin-top:0; }
+  .panel h2{ margin:0 0 14px; font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--text-dim); font-weight:600; display:flex; align-items:center; justify-content:space-between; gap:10px;}
+
+  canvas#preview{
+    display:block; width:100%; max-width:380px; margin:0 auto;
+    background-image:
+      linear-gradient(45deg, #1a2029 25%, transparent 25%, transparent 75%, #1a2029 75%),
+      linear-gradient(45deg, #1a2029 25%, transparent 25%, transparent 75%, #1a2029 75%);
+    background-size: 16px 16px; background-position: 0 0, 8px 8px; background-color:#11161d;
+    image-rendering:pixelated; border:1px solid var(--line);
+  }
+  .preview-status{font-family:var(--mono); font-size:11.5px; color:var(--text-dim); text-align:center; margin-top:10px; min-height:16px;}
+
+  .controls{margin-top:16px; display:flex; flex-direction:column; gap:10px;}
+  .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+  .row label{font-size:11.5px; color:var(--text-dim); min-width:80px; font-family:var(--mono);}
+  select, input[type=number], input[type=text]{
+    background:var(--bg); border:1px solid var(--line); color:var(--text); font-family:var(--mono);
+    font-size:12px; padding:6px 8px; border-radius:2px; flex:1; min-width:90px;
+  }
+  select:focus-visible, input:focus-visible{outline:1px solid var(--amber); outline-offset:1px;}
+  .checkrow{display:flex; align-items:center; gap:7px; font-size:11.5px; color:var(--text-dim); font-family:var(--mono); white-space:nowrap;}
+
+  .kv{display:grid; grid-template-columns:auto 1fr; gap:7px 14px; font-family:var(--mono); font-size:12.5px; margin:0;}
+  .kv dt{color:var(--text-dim);}
+  .kv dd{margin:0; color:var(--text);}
+  .badge{ display:inline-block; font-size:10px; padding:1px 6px; border-radius:2px; letter-spacing:.04em; text-transform:uppercase; border:1px solid currentColor; margin-left:4px; }
+  .badge.guess{color:var(--violet);}
+  .badge.ok{color:var(--green);}
+
+  .mosaic-row{display:flex; gap:16px; align-items:flex-start; margin-top:16px; flex-wrap:wrap;}
+  canvas#mosaic{ width:110px; height:110px; image-rendering:pixelated; border:1px solid var(--line); flex-shrink:0; }
+  .mosaic-note{font-size:11.5px; color:var(--text-dim); line-height:1.55; max-width:230px;}
+
+  .hex-scroll{ max-height:340px; overflow:auto; border:1px solid var(--line); background:var(--bg); }
+  table.hex{width:100%; border-collapse:collapse; font-family:var(--mono); font-size:11px;}
+  table.hex td{padding:2px 8px; white-space:nowrap;}
+  table.hex tr:nth-child(even){background:rgba(255,255,255,.02);}
+  td.off{color:var(--amber-dim); width:1%;}
+  td.bytes{color:var(--text); letter-spacing:.04em;}
+  td.ascii{color:var(--text-dim); width:1%;}
+  .hex-footer{display:flex; justify-content:space-between; align-items:center; padding:8px 4px; font-family:var(--mono); font-size:11px; color:var(--text-dim); flex-wrap:wrap; gap:8px;}
+
+  .sprite-toolbar{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px;}
+  .sprite-toolbar input[type=text]{flex:1; min-width:160px;}
+  .sprite-grid{
+    display:flex; flex-wrap:wrap; gap:10px; max-height:520px; overflow:auto;
+    border:1px solid var(--line); background:var(--bg); padding:10px;
+  }
+  .sprite-item{
+    width:96px; display:flex; flex-direction:column; align-items:center; gap:5px;
+    padding:6px; border:1px solid transparent; border-radius:2px; cursor:pointer;
+  }
+  .sprite-item:hover{ border-color:var(--amber-dim); background:rgba(232,163,61,.06); }
+  .sprite-item img{
+    max-width:80px; max-height:80px; image-rendering:pixelated;
+    background-image:
+      linear-gradient(45deg, #1a2029 25%, transparent 25%, transparent 75%, #1a2029 75%),
+      linear-gradient(45deg, #1a2029 25%, transparent 25%, transparent 75%, #1a2029 75%);
+    background-size: 10px 10px; background-position: 0 0, 5px 5px; background-color:#11161d;
+  }
+  .sprite-label{
+    font-family:var(--mono); font-size:9.5px; color:var(--text-dim); text-align:center;
+    width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .sprite-footer{display:flex; justify-content:space-between; align-items:center; padding-top:10px; font-family:var(--mono); font-size:11px; color:var(--text-dim); flex-wrap:wrap; gap:8px;}
+
+  .note{ margin-top:24px; padding:14px 16px; border:1px solid var(--line); background:var(--panel); font-size:12.5px; color:var(--text-dim); line-height:1.6; border-radius:2px; }
+  .note strong{color:var(--text);}
+
+  @media (prefers-reduced-motion: no-preference){
+    .panel, .filebar, .error{animation: rise .22s ease both;}
+    @keyframes rise{from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:none;}}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <span class="mark">ATF // INSPECTOR</span>
+      <h1>Adobe Texture Format reader</h1>
+    </div>
+    <span class="eyebrow">header · pixels · raw bytes · atlas</span>
+  </header>
+
+  <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Choose ATF or ATF.LZMA file, optionally with an atlas XML">
+    <span class="corner tl"></span><span class="corner tr"></span>
+    <span class="corner bl"></span><span class="corner br"></span>
+    <div class="dz-label">Drop .atf / .atf.lzma here</div>
+    <div class="dz-sub">drop the XML atlas alongside it too — everything runs in your browser, nothing is uploaded</div>
+    <input type="file" id="fileInput" aria-hidden="true" multiple>
+  </div>
+
+  <div id="filebar" class="filebar" style="display:none;">
+    <div class="files" id="fileList"></div>
+    <button class="btn ghost" id="clearBtn" type="button">Clear</button>
+  </div>
+
+  <div class="xmlrow" id="xmlRow" style="display:none;">
+    <label class="filelabel" for="xmlInput">+ atlas XML</label>
+    <input type="file" id="xmlInput" accept=".xml" aria-hidden="true">
+    <span id="xmlStatus">no atlas XML loaded — showing single-image preview only</span>
+  </div>
+
+  <div id="errorBox" class="error" role="alert" style="display:none;"></div>
+
+  <div id="results" style="display:none;">
+    <div class="grid">
+      <div class="panel">
+        <h2>Preview</h2>
+        <canvas id="preview" width="4" height="4"></canvas>
+        <div class="preview-status" id="previewStatus" aria-live="polite">—</div>
+
+        <div class="controls">
+          <div class="row">
+            <label for="fmtSelect">Decode as</label>
+            <select id="fmtSelect"></select>
+          </div>
+          <div class="row">
+            <label for="widthInput">Width</label>
+            <input type="number" id="widthInput" min="1">
+            <label for="heightInput">Height</label>
+            <input type="number" id="heightInput" min="1">
+          </div>
+          <div class="row">
+            <label for="offsetInput">Data offset</label>
+            <input type="number" id="offsetInput" min="0">
+          </div>
+          <div class="row">
+            <button class="btn" id="decodeBtn" type="button">Decode</button>
+            <button class="btn ghost" id="downloadBtn" type="button" disabled>Download PNG</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Header (best-effort)</h2>
+        <dl class="kv" id="headerKv"></dl>
+
+        <div class="mosaic-row">
+          <canvas id="mosaic" width="110" height="110"></canvas>
+          <div class="mosaic-note">Every byte in the (decompressed) file, plotted as a grayscale pixel — a sanity check that works independently of whether the header above parsed correctly.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="spritesPanel" style="display:none;">
+      <h2>Sprites from atlas XML <span class="badge ok" id="spriteBadge"></span></h2>
+      <div class="sprite-toolbar">
+        <input type="text" id="spriteFilter" placeholder="filter by name…">
+        <span class="checkrow"><input type="checkbox" id="padFrameCheck" checked> restore full animation frame (frameX/Y/Width/Height)</span>
+        <button class="btn small" id="zipBtn" type="button">Download all as ZIP</button>
+      </div>
+      <div class="sprite-grid" id="spriteGrid"></div>
+      <div class="sprite-footer">
+        <span id="spriteRange"></span>
+        <span id="zipStatus"></span>
+        <button class="btn ghost small" id="spriteMoreBtn" type="button">Show more</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Raw bytes</h2>
+      <div class="hex-scroll"><table class="hex" id="hexTable"></table></div>
+      <div class="hex-footer">
+        <span id="hexRange"></span>
+        <button class="btn ghost" id="moreHexBtn" type="button">Show more</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>About this tool.</strong> ATF header parsing is reconstructed from real sample files rather than official docs, so treat unfamiliar files as best-effort. Verified pixel decoding: raw RGBA/BGRA/RGB/BGR, DXT1/DXT5 (S3TC), and ETC1 — including the dual-plane ETC1 "color + alpha-as-grayscale" convention used by these particular files. PVRTC/ETC2/ASTC are detected but not decoded yet. <code>.atf.lzma</code> files are decompressed automatically (classic LZMA "alone" container) before parsing. Atlas XML support covers the Starling/Sparrow/TexturePacker <code>&lt;SubTexture&gt;</code> format. If anything parses wrong, every value in the Preview panel is manually editable.
+  </div>
+</div>
+
+<script>
+/* Vendored: LZMA-JS (decompress-only build), MIT License © Nathan Rugg. https://github.com/LZMA-JS/LZMA-JS
+   Exposes window.LZMA.decompress(byteArray, onFinish, onProgress) -> signed-byte array via callback. */
+var e=function(){"use strict";function r(e,r){postMessage({action:nr,cbn:r,result:e})}function o(e){var r=[];return r[e-1]=void 0,r}function n(e,r){return i(e[0]+r[0],e[1]+r[1])}function t(e,r){var o,n;return e[0]==r[0]&&e[1]==r[1]?0:(o=0>e[1],n=0>r[1],o&&!n?-1:!o&&n?1:d(e,r)[1]<0?-1:1)}function i(e,r){var o,n;for(r%=0x10000000000000000,e%=0x10000000000000000,o=r%ir,n=Math.floor(e/ir)*ir,r=r-o+n,e=e-n+o;0>e;)e+=ir,r-=ir;for(;e>4294967295;)e-=ir,r+=ir;for(r%=0x10000000000000000;r>0x7fffffff00000000;)r-=0x10000000000000000;for(;-0x8000000000000000>r;)r+=0x10000000000000000;return[e,r]}function u(e){return e>=0?[e,0]:[e+ir,-ir]}function s(e){return e[0]>=2147483648?~~Math.max(Math.min(e[0]-ir,2147483647),-2147483648):~~Math.max(Math.min(e[0],2147483647),-2147483648)}function d(e,r){return i(e[0]-r[0],e[1]-r[1])}function c(e,r){return e.ab=r,e.cb=0,e.O=r.length,e}function m(e){return e.cb>=e.O?-1:255&e.ab[e.cb++]}function a(e){return e.ab=o(32),e.O=0,e}function _(e){var r=e.ab;return r.length=e.O,r}function f(e,r,o,n){p(r,o,e.ab,e.O,n),e.O+=n}function p(e,r,o,n,t){for(var i=0;t>i;++i)o[n+i]=e[r+i]}function D(e,r,o){var n,t,i,s,d="",c=[];for(t=0;5>t;++t){if(i=m(r),-1==i)throw Error("truncated input");c[t]=i<<24>>24}if(n=N({}),!z(n,c))throw Error("corrupted input");for(t=0;64>t;t+=8){if(i=m(r),-1==i)throw Error("truncated input");i=i.toString(16),1==i.length&&(i="0"+i),d=i+""+d}/^0+$|^f+$/i.test(d)?e.N=ur:(s=parseInt(d,16),e.N=s>4294967295?ur:u(s)),e.Q=B(n,r,o,e.N)}function l(e,r){return e.S=a({}),D(e,c({},r),e.S),e}function g(e,r,o){var n=e.D-r-1;for(0>n&&(n+=e.c);0!=o;--o)n>=e.c&&(n=0),e.x[e.D++]=e.x[n++],e.D>=e.c&&w(e)}function v(e,r){(null==e.x||e.c!=r)&&(e.x=o(r)),e.c=r,e.D=0,e.w=0}function w(e){var r=e.D-e.w;r&&(f(e.V,e.x,e.w,r),e.D>=e.c&&(e.D=0),e.w=e.D)}function R(e,r){var o=e.D-r-1;return 0>o&&(o+=e.c),e.x[o]}function h(e,r){e.x[e.D++]=r,e.D>=e.c&&w(e)}function P(e){w(e),e.V=null}function C(e){return e-=2,4>e?e:3}function S(e){return 4>e?0:10>e?e-3:e-6}function M(e,r){return e.h=r,e.bb=null,e.X=1,e}function L(e){if(!e.X)throw Error("bad state");if(e.bb)throw Error("No encoding");return y(e),e.X}function y(e){var r=I(e.h);if(-1==r)throw Error("corrupted input");e.$=ur,e.Z=e.h.d,(r||t(e.h.U,sr)>=0&&t(e.h.d,e.h.U)>=0)&&(w(e.h.b),P(e.h.b),e.h.a.K=null,e.X=0)}function B(e,r,o,n){return e.a.K=r,P(e.b),e.b.V=o,b(e),e.f=0,e.l=0,e.T=0,e.R=0,e._=0,e.U=n,e.d=sr,e.I=0,M({},e)}function I(e){var r,o,i,d,c,m;if(m=s(e.d)&e.P,Q(e.a,e.q,(e.f<<4)+m)){if(Q(e.a,e.E,e.f))i=0,Q(e.a,e.s,e.f)?(Q(e.a,e.u,e.f)?(Q(e.a,e.r,e.f)?(o=e._,e._=e.R):o=e.R,e.R=e.T):o=e.T,e.T=e.l,e.l=o):Q(e.a,e.n,(e.f<<4)+m)||(e.f=7>e.f?9:11,i=1),i||(i=x(e.o,e.a,m)+2,e.f=7>e.f?8:11);else if(e._=e.R,e.R=e.T,e.T=e.l,i=2+x(e.C,e.a,m),e.f=7>e.f?7:10,c=q(e.j[C(i)],e.a),c>=4){if(d=(c>>1)-1,e.l=(2|1&c)<<d,14>c)e.l+=J(e.J,e.l-c-1,e.a,d);else if(e.l+=U(e.a,d-4)<<4,e.l+=F(e.t,e.a),0>e.l)return-1==e.l?1:-1}else e.l=c;if(t(u(e.l),e.d)>=0||e.l>=e.m)return-1;g(e.b,e.l,i),e.d=n(e.d,u(i)),e.I=R(e.b,0)}else r=Z(e.k,s(e.d),e.I),e.I=7>e.f?T(r,e.a):$(r,e.a,R(e.b,e.l)),h(e.b,e.I),e.f=S(e.f),e.d=n(e.d,dr);return 0}function N(e){e.b={},e.a={},e.q=o(192),e.E=o(12),e.s=o(12),e.u=o(12),e.r=o(12),e.n=o(192),e.j=o(4),e.J=o(114),e.t=K({},4),e.C=G({}),e.o=G({}),e.k={};for(var r=0;4>r;++r)e.j[r]=K({},6);return e}function b(e){e.b.w=0,e.b.D=0,X(e.q),X(e.n),X(e.E),X(e.s),X(e.u),X(e.r),X(e.J),H(e.k);for(var r=0;4>r;++r)X(e.j[r].B);A(e.C),A(e.o),X(e.t.B),V(e.a)}function z(e,r){var o,n,t,i,u,s,d;if(5>r.length)return 0;for(d=255&r[0],t=d%9,s=~~(d/9),i=s%5,u=~~(s/5),o=0,n=0;4>n;++n)o+=(255&r[1+n])<<8*n;return o>99999999||!W(e,t,i,u)?0:O(e,o)}function O(e,r){return 0>r?0:(e.z!=r&&(e.z=r,e.m=Math.max(e.z,1),v(e.b,Math.max(e.m,4096))),1)}function W(e,r,o,n){if(r>8||o>4||n>4)return 0;E(e.k,o,r);var t=1<<n;return k(e.C,t),k(e.o,t),e.P=t-1,1}function k(e,r){for(;r>e.e;++e.e)e.G[e.e]=K({},3),e.H[e.e]=K({},3)}function x(e,r,o){if(!Q(r,e.M,0))return q(e.G[o],r);var n=8;return n+=Q(r,e.M,1)?8+q(e.L,r):q(e.H[o],r)}function G(e){return e.M=o(2),e.G=o(16),e.H=o(16),e.L=K({},8),e.e=0,e}function A(e){X(e.M);for(var r=0;e.e>r;++r)X(e.G[r].B),X(e.H[r].B);X(e.L.B)}function E(e,r,n){var t,i;if(null==e.F||e.g!=n||e.y!=r)for(e.y=r,e.Y=(1<<r)-1,e.g=n,i=1<<e.g+e.y,e.F=o(i),t=0;i>t;++t)e.F[t]=j({})}function Z(e,r,o){return e.F[((r&e.Y)<<e.g)+((255&o)>>>8-e.g)]}function H(e){var r,o;for(o=1<<e.g+e.y,r=0;o>r;++r)X(e.F[r].v)}function T(e,r){var o=1;do o=o<<1|Q(r,e.v,o);while(256>o);return o<<24>>24}function $(e,r,o){var n,t,i=1;do if(t=o>>7&1,o<<=1,n=Q(r,e.v,(1+t<<8)+i),i=i<<1|n,t!=n){for(;256>i;)i=i<<1|Q(r,e.v,i);break}while(256>i);return i<<24>>24}function j(e){return e.v=o(768),e}function K(e,r){return e.A=r,e.B=o(1<<r),e}function q(e,r){var o,n=1;for(o=e.A;0!=o;--o)n=(n<<1)+Q(r,e.B,n);return n-(1<<e.A)}function F(e,r){var o,n,t=1,i=0;for(n=0;e.A>n;++n)o=Q(r,e.B,t),t<<=1,t+=o,i|=o<<n;return i}function J(e,r,o,n){var t,i,u=1,s=0;for(i=0;n>i;++i)t=Q(o,e,r+u),u<<=1,u+=t,s|=t<<i;return s}function Q(e,r,o){var n,t=r[o];return n=(e.i>>>11)*t,(-2147483648^n)>(-2147483648^e.p)?(e.i=n,r[o]=t+(2048-t>>>5)<<16>>16,-16777216&e.i||(e.p=e.p<<8|m(e.K),e.i<<=8),0):(e.i-=n,e.p-=n,r[o]=t-(t>>>5)<<16>>16,-16777216&e.i||(e.p=e.p<<8|m(e.K),e.i<<=8),1)}function U(e,r){var o,n,t=0;for(o=r;0!=o;--o)e.i>>>=1,n=e.p-e.i>>>31,e.p-=e.i&n-1,t=t<<1|1-n,-16777216&e.i||(e.p=e.p<<8|m(e.K),e.i<<=8);return t}function V(e){e.p=0,e.i=-1;for(var r=0;5>r;++r)e.p=e.p<<8|m(e.K)}function X(e){for(var r=e.length-1;r>=0;--r)e[r]=1024}function Y(e){for(var r,o,n,t=0,i=0,u=e.length,s=[],d=[];u>t;++t,++i){if(r=255&e[t],128&r)if(192==(224&r)){if(t+1>=u)return e;if(o=255&e[++t],128!=(192&o))return e;d[i]=(31&r)<<6|63&o}else{if(224!=(240&r))return e;if(t+2>=u)return e;if(o=255&e[++t],128!=(192&o))return e;if(n=255&e[++t],128!=(192&n))return e;d[i]=(15&r)<<12|(63&o)<<6|63&n}else{if(!r)return e;d[i]=r}16383==i&&(s.push(String.fromCharCode.apply(String,d)),i=-1)}return i>0&&(d.length=i,s.push(String.fromCharCode.apply(String,d))),s.join("")}function er(e){return e[1]+e[0]}function rr(e,o,n){function t(){try{for(var e,r=0,u=(new Date).getTime();L(c.d.Q);)if(++r%1e3==0&&(new Date).getTime()-u>200)return s&&(i=er(c.d.Q.h.d)/d,n(i)),tr(t,0),0;n(1),e=Y(_(c.d.S)),tr(o.bind(null,e),0)}catch(m){o(null,m)}}var i,u,s,d,c={},m=void 0===o&&void 0===n;if("function"!=typeof o&&(u=o,o=n=0),n=n||function(e){return void 0!==u?r(s?e:-1,u):void 0},o=o||function(e,r){return void 0!==u?postMessage({action:or,cbn:u,result:e,error:r}):void 0},m){for(c.d=l({},e);L(c.d.Q););return Y(_(c.d.S))}try{c.d=l({},e),d=er(c.d.N),s=d>-1,n(0)}catch(a){return o(null,a)}tr(t,0)}var or=2,nr=3,tr="function"==typeof setImmediate?setImmediate:setTimeout,ir=4294967296,ur=[4294967295,-ir],sr=[0,0],dr=[1,0];return"undefined"==typeof onmessage||"undefined"!=typeof window&&void 0!==window.document||!function(){onmessage=function(r){r&&r.W&&r.W.action==or&&e.decompress(r.W.W,r.W.cbn)}}(),{decompress:rr}}();this.LZMA=this.LZMA_WORKER=e;</script>
+<script>
+(function(){
+  'use strict';
+
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const filebar = document.getElementById('filebar');
+  const fileList = document.getElementById('fileList');
+  const clearBtn = document.getElementById('clearBtn');
+  const xmlRow = document.getElementById('xmlRow');
+  const xmlInput = document.getElementById('xmlInput');
+  const xmlStatus = document.getElementById('xmlStatus');
+  const errorBox = document.getElementById('errorBox');
+  const results = document.getElementById('results');
+  const headerKv = document.getElementById('headerKv');
+  const fmtSelect = document.getElementById('fmtSelect');
+  const widthInput = document.getElementById('widthInput');
+  const heightInput = document.getElementById('heightInput');
+  const offsetInput = document.getElementById('offsetInput');
+  const decodeBtn = document.getElementById('decodeBtn');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const previewCanvas = document.getElementById('preview');
+  const previewStatus = document.getElementById('previewStatus');
+  const mosaicCanvas = document.getElementById('mosaic');
+  const hexTable = document.getElementById('hexTable');
+  const hexRange = document.getElementById('hexRange');
+  const moreHexBtn = document.getElementById('moreHexBtn');
+  const spritesPanel = document.getElementById('spritesPanel');
+  const spriteBadge = document.getElementById('spriteBadge');
+  const spriteFilter = document.getElementById('spriteFilter');
+  const padFrameCheck = document.getElementById('padFrameCheck');
+  const zipBtn = document.getElementById('zipBtn');
+  const zipStatus = document.getElementById('zipStatus');
+  const spriteGrid = document.getElementById('spriteGrid');
+  const spriteRange = document.getElementById('spriteRange');
+  const spriteMoreBtn = document.getElementById('spriteMoreBtn');
+
+  let bytes = null;            // decoded (post-LZMA) ATF bytes
+  let currentFileName = 'texture';
+  let hexShown = 0;
+  let atlasEntries = null;     // parsed <SubTexture> entries from XML
+  let spriteShown = 0;
+  let lastDecodeOk = false;
+
+  const FORMATS = [
+    {id:'rgba', label:'Raw RGBA'},
+    {id:'bgra', label:'Raw BGRA'},
+    {id:'rgb', label:'Raw RGB'},
+    {id:'bgr', label:'Raw BGR'},
+    {id:'dxt1', label:'DXT1 / BC1'},
+    {id:'dxt5', label:'DXT5 / BC3'},
+    {id:'etc1', label:'ETC1 (RGB, opaque)'},
+    {id:'etc1dual', label:'ETC1 dual-plane (RGB + alpha)'},
+    {id:'unsupported', label:'Unsupported codec (hex only)'}
+  ];
+  FORMATS.forEach(f=>{
+    const opt = document.createElement('option');
+    opt.value=f.id; opt.textContent=f.label;
+    fmtSelect.appendChild(opt);
+  });
+
+  function fmtBytes(n){
+    if (n<1024) return n+' B';
+    if (n<1024*1024) return (n/1024).toFixed(1)+' KB';
+    return (n/(1024*1024)).toFixed(2)+' MB';
+  }
+
+  // ---------- header parsing (best-effort, validated against two real sample files) ----------
+  function parseHeader(bytes){
+    const info = {valid:false};
+    if (bytes.length < 7){ info.error = 'File is too short to contain an ATF header.'; return info; }
+    const sig = String.fromCharCode(bytes[0],bytes[1],bytes[2]);
+    if (sig !== 'ATF'){
+      info.error = 'No "ATF" signature in the first 3 bytes — this may not be an ATF file, or uses a variant this tool doesn\'t recognize.';
+      return info;
+    }
+    // Two known preamble shapes. Rather than trust a single fragile marker byte,
+    // self-validate: the "extended" shape has a 4-byte BE length field (at offset 8)
+    // that should exactly equal (file length - 12) if this is really that shape.
+    let offset = 3;
+    let isV2 = false;
+    let declaredLength = null;
+    if (bytes.length >= 16){
+      const candidateLen = (bytes[8]<<24 | bytes[9]<<16 | bytes[10]<<8 | bytes[11]) >>> 0;
+      if (candidateLen === bytes.length - 12){
+        isV2 = true;
+        declaredLength = candidateLen;
+        offset = 12;
+      }
+    }
+    if (bytes.length < offset+16){ info.error = 'Header is truncated.'; return info; }
+
+    const formatByte = bytes[offset];
+    const isCubeMap = (formatByte & 0x80) !== 0;
+    const formatCode = formatByte & 0x7F;
+    const widthExp = bytes[offset+1];
+    const heightExp = bytes[offset+2];
+    const numTextures = bytes[offset+3];
+    const dataTailOffset = offset+4;
+
+    // Each texture/mip "entry" appears to be: [8 reserved bytes][4-byte BE length][length bytes of data]
+    const entryLenOffset = dataTailOffset + 8;
+    const entryLength = (bytes[entryLenOffset]<<24 | bytes[entryLenOffset+1]<<16 | bytes[entryLenOffset+2]<<8 | bytes[entryLenOffset+3]) >>> 0;
+    const entryDataOffset = entryLenOffset + 4;
+
+    const FORMAT_GROUPS = {
+      0:{label:'Raw (uncompressed)', kind:'raw'},
+      1:{label:'Raw + alpha (uncompressed)', kind:'raw'},
+      2:{label:'Compressed', kind:'compressed'},
+      3:{label:'Compressed + alpha', kind:'compressed'},
+      4:{label:'Compressed (raw codec)', kind:'compressed'},
+      5:{label:'Compressed (raw codec) + alpha — confirmed ETC1 dual-plane on sample files', kind:'compressed'},
+      12:{label:'ASTC', kind:'compressed'},
+      13:{label:'ASTC + alpha', kind:'compressed'}
+    };
+    const group = FORMAT_GROUPS[formatCode] || {label:'Unknown ('+formatCode+')', kind:'unknown'};
+
+    info.valid = true;
+    info.isV2 = isV2;
+    info.declaredLength = declaredLength;
+    info.dataTailOffset = dataTailOffset;
+    info.entryLength = entryLength;
+    info.entryDataOffset = entryDataOffset;
+    info.formatCode = formatCode;
+    info.formatLabel = group.label;
+    info.formatKind = group.kind;
+    info.isCubeMap = isCubeMap;
+    info.width = Math.pow(2, widthExp);
+    info.height = Math.pow(2, heightExp);
+    info.numTextures = numTextures;
+    return info;
+  }
+
+  // ---------- raw decode ----------
+  function decodeRaw(bytes, offset, width, height, mode){
+    const channels = (mode==='rgb'||mode==='bgr') ? 3 : 4;
+    const needed = offset + width*height*channels;
+    if (needed > bytes.length) throw new Error('Not enough data for '+width+'\u00d7'+height+' at this offset/format (need '+fmtBytes(needed)+', file is '+fmtBytes(bytes.length)+').');
+    const img = new ImageData(width, height);
+    for (let i=0;i<width*height;i++){
+      const src = offset + i*channels;
+      let r,g,b,a=255;
+      if (mode==='rgba'){ r=bytes[src]; g=bytes[src+1]; b=bytes[src+2]; a=bytes[src+3]; }
+      else if (mode==='bgra'){ b=bytes[src]; g=bytes[src+1]; r=bytes[src+2]; a=bytes[src+3]; }
+      else if (mode==='rgb'){ r=bytes[src]; g=bytes[src+1]; b=bytes[src+2]; }
+      else { b=bytes[src]; g=bytes[src+1]; r=bytes[src+2]; }
+      const idx=i*4;
+      img.data[idx]=r; img.data[idx+1]=g; img.data[idx+2]=b; img.data[idx+3]=a;
+    }
+    return img;
+  }
+
+  function rgb565(c){
+    const r5=(c>>11)&0x1F, g6=(c>>5)&0x3F, b5=c&0x1F;
+    return [(r5<<3)|(r5>>2), (g6<<2)|(g6>>4), (b5<<3)|(b5>>2)];
+  }
+
+  function decodeDXT1Block(b, off){
+    const c0=b[off]|(b[off+1]<<8), c1=b[off+2]|(b[off+3]<<8);
+    const r0=rgb565(c0), r1=rgb565(c1);
+    let pal;
+    if (c0>c1){
+      const r2=[Math.round((2*r0[0]+r1[0])/3),Math.round((2*r0[1]+r1[1])/3),Math.round((2*r0[2]+r1[2])/3)];
+      const r3=[Math.round((r0[0]+2*r1[0])/3),Math.round((r0[1]+2*r1[1])/3),Math.round((r0[2]+2*r1[2])/3)];
+      pal=[[r0[0],r0[1],r0[2],255],[r1[0],r1[1],r1[2],255],[r2[0],r2[1],r2[2],255],[r3[0],r3[1],r3[2],255]];
+    } else {
+      const r2=[Math.round((r0[0]+r1[0])/2),Math.round((r0[1]+r1[1])/2),Math.round((r0[2]+r1[2])/2)];
+      pal=[[r0[0],r0[1],r0[2],255],[r1[0],r1[1],r1[2],255],[r2[0],r2[1],r2[2],255],[0,0,0,0]];
+    }
+    const raw=(b[off+4])|(b[off+5]<<8)|(b[off+6]<<16)|(b[off+7]<<24);
+    const px=new Array(16);
+    for (let i=0;i<16;i++) px[i]=pal[(raw>>>(i*2))&3];
+    return px;
+  }
+
+  function decodeDXT5Block(b, off){
+    const a0=b[off], a1=b[off+1];
+    let bits=0n;
+    for (let i=0;i<6;i++) bits |= BigInt(b[off+2+i])<<BigInt(8*i);
+    const aIdx=new Array(16);
+    for (let i=0;i<16;i++) aIdx[i]=Number((bits>>BigInt(3*i))&7n);
+    const aPal=new Array(8); aPal[0]=a0; aPal[1]=a1;
+    if (a0>a1){ for(let i=1;i<=6;i++) aPal[1+i]=Math.round(((7-i)*a0+i*a1)/7); }
+    else { for(let i=1;i<=4;i++) aPal[1+i]=Math.round(((5-i)*a0+i*a1)/5); aPal[6]=0; aPal[7]=255; }
+
+    const co=off+8;
+    const c0=b[co]|(b[co+1]<<8), c1=b[co+2]|(b[co+3]<<8);
+    const r0=rgb565(c0), r1=rgb565(c1);
+    const r2=[Math.round((2*r0[0]+r1[0])/3),Math.round((2*r0[1]+r1[1])/3),Math.round((2*r0[2]+r1[2])/3)];
+    const r3=[Math.round((r0[0]+2*r1[0])/3),Math.round((r0[1]+2*r1[1])/3),Math.round((r0[2]+2*r1[2])/3)];
+    const cpal=[r0,r1,r2,r3];
+    const craw=(b[co+4])|(b[co+5]<<8)|(b[co+6]<<16)|(b[co+7]<<24);
+    const px=new Array(16);
+    for (let i=0;i<16;i++){
+      const c=cpal[(craw>>>(i*2))&3];
+      px[i]=[c[0],c[1],c[2],aPal[aIdx[i]]];
+    }
+    return px;
+  }
+
+  function decodeDXT(bytes, offset, width, height, isDxt5){
+    const blockSize = isDxt5?16:8;
+    const blocksX=Math.ceil(width/4), blocksY=Math.ceil(height/4);
+    const needed = offset + blocksX*blocksY*blockSize;
+    if (needed > bytes.length) throw new Error('Not enough data for a '+width+'\u00d7'+height+' '+(isDxt5?'DXT5':'DXT1')+' image at this offset (need '+fmtBytes(needed)+', file is '+fmtBytes(bytes.length)+').');
+    const img = new ImageData(width, height);
+    let off = offset;
+    for (let by=0; by<blocksY; by++){
+      for (let bx=0; bx<blocksX; bx++){
+        const px = isDxt5 ? decodeDXT5Block(bytes, off) : decodeDXT1Block(bytes, off);
+        off += blockSize;
+        for (let row=0; row<4; row++){
+          const py=by*4+row; if (py>=height) continue;
+          for (let col=0; col<4; col++){
+            const pxx=bx*4+col; if (pxx>=width) continue;
+            const p=px[row*4+col];
+            const idx=(py*width+pxx)*4;
+            img.data[idx]=p[0]; img.data[idx+1]=p[1]; img.data[idx+2]=p[2]; img.data[idx+3]=p[3];
+          }
+        }
+      }
+    }
+    return img;
+  }
+
+  // ---------- ETC1 decode (ported & pixel-verified against Ericsson's reference etcdec.cxx) ----------
+  const ETC1_UNSCRAMBLE = [2,3,1,0];
+  const ETC1_TABLE = [
+    [-8,-2,2,8],[-8,-2,2,8],[-17,-5,5,17],[-17,-5,5,17],
+    [-29,-9,9,29],[-29,-9,9,29],[-42,-13,13,42],[-42,-13,13,42],
+    [-60,-18,18,60],[-60,-18,18,60],[-80,-24,24,80],[-80,-24,24,80],
+    [-106,-33,33,106],[-106,-33,33,106],[-183,-47,47,183],[-183,-47,47,183]
+  ];
+  function clamp8(v){ return v<0?0:(v>255?255:v); }
+
+  function decodeETC1Block(bytes, off, out, width, height, startx, starty){
+    const bp1 = ((bytes[off]<<24) | (bytes[off+1]<<16) | (bytes[off+2]<<8) | bytes[off+3]) >>> 0;
+    const bp2 = ((bytes[off+4]<<24) | (bytes[off+5]<<16) | (bytes[off+6]<<8) | bytes[off+7]) >>> 0;
+    const diffbit = (bp1 >>> 1) & 1;
+    const flipbit = bp1 & 1;
+    function hi(size, startpos){ const shift = (startpos-32)-size+1; return (bp1 >>> shift) & ((1<<size)-1); }
+    function lo(size, startpos){ const shift = startpos-size+1; return (bp2 >>> shift) & ((1<<size)-1); }
+    const pixelMSB = lo(16,31);
+    const pixelLSB = lo(16,15);
+
+    let avg1, avg2;
+    if (!diffbit){
+      avg1 = [hi(4,63), hi(4,55), hi(4,47)].map(v => v | (v<<4));
+      avg2 = [hi(4,59), hi(4,51), hi(4,43)].map(v => v | (v<<4));
+    } else {
+      const enc1 = [hi(5,63), hi(5,55), hi(5,47)];
+      avg1 = enc1.map(v => (v<<3) | (v>>2));
+      let d = [hi(3,58), hi(3,50), hi(3,42)];
+      d = d.map(x => x>3 ? x-8 : x);
+      const enc2 = [enc1[0]+d[0], enc1[1]+d[1], enc1[2]+d[2]];
+      avg2 = enc2.map(v => (v<<3) | (v>>2));
+    }
+    const table1 = hi(3,39) << 1;
+    const table2 = hi(3,36) << 1;
+
+    for (let lx=0; lx<4; lx++){
+      for (let ly=0; ly<4; ly++){
+        const shift = lx*4+ly;
+        const rawIdx = (((pixelMSB>>>shift)&1)<<1) | ((pixelLSB>>>shift)&1);
+        const idx = ETC1_UNSCRAMBLE[rawIdx];
+        const sub = flipbit===0 ? (lx<2?0:1) : (ly<2?0:1);
+        const avg = sub===0 ? avg1 : avg2;
+        const table = sub===0 ? table1 : table2;
+        const mod = ETC1_TABLE[table][idx];
+        const x = startx+lx, y = starty+ly;
+        if (x<width && y<height){
+          const i = (y*width+x)*4;
+          out[i]   = clamp8(avg[0]+mod);
+          out[i+1] = clamp8(avg[1]+mod);
+          out[i+2] = clamp8(avg[2]+mod);
+        }
+      }
+    }
+  }
+
+  function decodeETC1PlaneInto(bytes, offset, width, height, out){
+    const blocksX = Math.ceil(width/4), blocksY = Math.ceil(height/4);
+    let off = offset;
+    for (let by=0; by<blocksY; by++){
+      for (let bx=0; bx<blocksX; bx++){
+        decodeETC1Block(bytes, off, out, width, height, bx*4, by*4);
+        off += 8;
+      }
+    }
+    return off;
+  }
+
+  function decodeETC1(bytes, offset, width, height, dual){
+    const blocksX = Math.ceil(width/4), blocksY = Math.ceil(height/4);
+    const planeBytes = blocksX*blocksY*8;
+    const needed = offset + planeBytes*(dual?2:1);
+    if (needed > bytes.length) throw new Error('Not enough data for a '+width+'\u00d7'+height+' ETC1'+(dual?' dual-plane':'')+' image at this offset (need '+fmtBytes(needed)+', file is '+fmtBytes(bytes.length)+').');
+    const img = new ImageData(width, height);
+    img.data.fill(255);
+    decodeETC1PlaneInto(bytes, offset, width, height, img.data);
+    if (dual){
+      const tmp = new Uint8ClampedArray(width*height*4);
+      decodeETC1PlaneInto(bytes, offset+planeBytes, width, height, tmp);
+      for (let i=0;i<width*height;i++) img.data[i*4+3] = tmp[i*4];
+    }
+    return img;
+  }
+
+  // ---------- minimal ZIP writer (store method, CRC32 verified against Python's zipfile) ----------
+  const CRC_TABLE = (function(){
+    const t = new Uint32Array(256);
+    for (let n=0;n<256;n++){
+      let c = n;
+      for (let k=0;k<8;k++) c = (c & 1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1);
+      t[n] = c>>>0;
+    }
+    return t;
+  })();
+  function crc32(bytesArr){
+    let crc = 0xFFFFFFFF;
+    for (let i=0;i<bytesArr.length;i++) crc = CRC_TABLE[(crc ^ bytesArr[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+  function createZip(files){
+    const now = new Date();
+    const time = ((now.getHours()&0x1F)<<11) | ((now.getMinutes()&0x3F)<<5) | ((now.getSeconds()>>1)&0x1F);
+    const date = (((now.getFullYear()-1980)&0x7F)<<9) | (((now.getMonth()+1)&0xF)<<5) | (now.getDate()&0x1F);
+    const chunks = [], central = [];
+    let offset = 0;
+    for (const f of files){
+      const nameBytes = new TextEncoder().encode(f.name);
+      const data = f.data;
+      const crc = crc32(data);
+      const local = new Uint8Array(30 + nameBytes.length);
+      const lv = new DataView(local.buffer);
+      lv.setUint32(0, 0x04034b50, true); lv.setUint16(4,20,true); lv.setUint16(6,0,true); lv.setUint16(8,0,true);
+      lv.setUint16(10,time,true); lv.setUint16(12,date,true); lv.setUint32(14,crc,true);
+      lv.setUint32(18,data.length,true); lv.setUint32(22,data.length,true);
+      lv.setUint16(26,nameBytes.length,true); lv.setUint16(28,0,true);
+      local.set(nameBytes, 30);
+      chunks.push(local, data);
+
+      const cr = new Uint8Array(46 + nameBytes.length);
+      const cv = new DataView(cr.buffer);
+      cv.setUint32(0,0x02014b50,true); cv.setUint16(4,20,true); cv.setUint16(6,20,true); cv.setUint16(8,0,true);
+      cv.setUint16(10,0,true); cv.setUint16(12,time,true); cv.setUint16(14,date,true); cv.setUint32(16,crc,true);
+      cv.setUint32(20,data.length,true); cv.setUint32(24,data.length,true);
+      cv.setUint16(28,nameBytes.length,true); cv.setUint16(30,0,true); cv.setUint16(32,0,true);
+      cv.setUint16(34,0,true); cv.setUint16(36,0,true); cv.setUint32(38,0,true); cv.setUint32(42,offset,true);
+      cr.set(nameBytes, 46);
+      central.push(cr);
+      offset += local.length + data.length;
+    }
+    const centralStart = offset;
+    let centralSize = 0;
+    for (const c of central){ chunks.push(c); centralSize += c.length; }
+    const end = new Uint8Array(22);
+    const ev = new DataView(end.buffer);
+    ev.setUint32(0,0x06054b50,true); ev.setUint16(4,0,true); ev.setUint16(6,0,true);
+    ev.setUint16(8,files.length,true); ev.setUint16(10,files.length,true);
+    ev.setUint32(12,centralSize,true); ev.setUint32(16,centralStart,true); ev.setUint16(20,0,true);
+    chunks.push(end);
+    let total=0; for (const c of chunks) total+=c.length;
+    const out = new Uint8Array(total);
+    let p=0; for (const c of chunks){ out.set(c,p); p+=c.length; }
+    return out;
+  }
+
+  // ---------- hex + byte mosaic ----------
+  function renderMosaic(bytes){
+    const total = bytes.length;
+    const side = Math.max(1, Math.min(110, Math.ceil(Math.sqrt(total))));
+    mosaicCanvas.width = side; mosaicCanvas.height = side;
+    const ctx = mosaicCanvas.getContext('2d');
+    const img = ctx.createImageData(side, side);
+    const cells = side*side;
+    for (let i=0;i<cells;i++){
+      const srcIdx = Math.min(total-1, Math.floor(i/cells*total));
+      const v = bytes[srcIdx];
+      const idx=i*4;
+      img.data[idx]=v; img.data[idx+1]=v; img.data[idx+2]=v; img.data[idx+3]=255;
+    }
+    ctx.putImageData(img,0,0);
+  }
+
+  function renderHex(bytes, rowCount){
+    const totalRows = Math.ceil(bytes.length/16);
+    const rows = Math.min(rowCount, totalRows);
+    let html='';
+    for (let r=0;r<rows;r++){
+      const off = r*16;
+      let hex='', asc='';
+      for (let c=0;c<16;c++){
+        const i=off+c;
+        if (i<bytes.length){
+          const v=bytes[i];
+          hex += v.toString(16).padStart(2,'0')+' ';
+          asc += (v>=32 && v<127) ? String.fromCharCode(v) : '\u00b7';
+        } else { hex += '   '; asc += ' '; }
+      }
+      html += '<tr><td class="off">'+off.toString(16).padStart(6,'0')+'</td><td class="bytes">'+hex+'</td><td class="ascii">'+asc+'</td></tr>';
+    }
+    hexTable.innerHTML = html;
+    hexShown = rows;
+    hexRange.textContent = 'rows 0\u2013'+rows+' of '+totalRows+' ('+fmtBytes(bytes.length)+' total)';
+    moreHexBtn.style.display = rows>=totalRows ? 'none' : '';
+  }
+
+  // ---------- atlas XML parsing + sprite slicing ----------
+  function parseAtlasXML(xmlText){
+    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    const perr = doc.querySelector('parsererror');
+    if (perr) throw new Error('XML did not parse.');
+    const nodes = doc.querySelectorAll('SubTexture');
+    if (!nodes.length) throw new Error('No <SubTexture> entries found \u2014 only the Starling/Sparrow/TexturePacker TextureAtlas XML format is supported right now.');
+    const entries = [];
+    nodes.forEach(n=>{
+      const gi = (name)=> n.hasAttribute(name) ? parseInt(n.getAttribute(name),10) : null;
+      entries.push({
+        name: n.getAttribute('name') || ('sprite_'+entries.length),
+        x: gi('x')||0, y: gi('y')||0, w: gi('width')||0, h: gi('height')||0,
+        frameX: gi('frameX'), frameY: gi('frameY'), frameW: gi('frameWidth'), frameH: gi('frameHeight')
+      });
+    });
+    return entries;
+  }
+
+  function cropSpriteCanvas(entry, padToFrame){
+    const useFrame = padToFrame && entry.frameW && entry.frameH;
+    const outW = useFrame ? entry.frameW : entry.w;
+    const outH = useFrame ? entry.frameH : entry.h;
+    const c = document.createElement('canvas');
+    c.width = Math.max(1,outW); c.height = Math.max(1,outH);
+    const ctx = c.getContext('2d');
+    const dx = useFrame ? -entry.frameX : 0;
+    const dy = useFrame ? -entry.frameY : 0;
+    if (entry.w>0 && entry.h>0){
+      ctx.drawImage(previewCanvas, entry.x, entry.y, entry.w, entry.h, dx, dy, entry.w, entry.h);
+    }
+    return c;
+  }
+
+  function safeName(name){ return name.replace(/[^a-z0-9_\-]+/gi,'_'); }
+
+  function currentEntries(){
+    const q = spriteFilter.value.trim().toLowerCase();
+    if (!atlasEntries) return [];
+    return q ? atlasEntries.filter(e=>e.name.toLowerCase().includes(q)) : atlasEntries;
+  }
+
+  function renderSpriteGrid(limit){
+    const entries = currentEntries();
+    const padToFrame = padFrameCheck.checked;
+    const subset = entries.slice(0, limit);
+    spriteGrid.innerHTML = '';
+    subset.forEach(entry=>{
+      const canvas = cropSpriteCanvas(entry, padToFrame);
+      const wrap = document.createElement('div');
+      wrap.className = 'sprite-item';
+      wrap.tabIndex = 0;
+      const img = document.createElement('img');
+      img.src = canvas.toDataURL('image/png');
+      img.alt = entry.name;
+      const label = document.createElement('div');
+      label.className = 'sprite-label';
+      label.textContent = entry.name;
+      label.title = entry.name;
+      wrap.appendChild(img); wrap.appendChild(label);
+      const doDownload = ()=>{
+        const a = document.createElement('a');
+        a.href = img.src; a.download = safeName(entry.name)+'.png'; a.click();
+      };
+      wrap.addEventListener('click', doDownload);
+      wrap.addEventListener('keydown', (e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); doDownload(); }});
+      spriteGrid.appendChild(wrap);
+    });
+    spriteShown = subset.length;
+    spriteRange.textContent = subset.length+' of '+entries.length+' shown \u2014 click a sprite to download it';
+    spriteMoreBtn.style.display = subset.length>=entries.length ? 'none' : '';
+  }
+
+  function maybeRenderSprites(){
+    if (!atlasEntries || !lastDecodeOk) return;
+    spritesPanel.style.display = '';
+    spriteBadge.textContent = atlasEntries.length+' sprites';
+    renderSpriteGrid(Math.max(60, spriteShown||60));
+  }
+
+  async function downloadAllSprites(){
+    const entries = currentEntries();
+    if (!entries.length) return;
+    const padToFrame = padFrameCheck.checked;
+    zipBtn.disabled = true;
+    const files = [];
+    for (let i=0;i<entries.length;i++){
+      const entry = entries[i];
+      const canvas = cropSpriteCanvas(entry, padToFrame);
+      const blob = await new Promise(res=>canvas.toBlob(res,'image/png'));
+      const buf = new Uint8Array(await blob.arrayBuffer());
+      files.push({name: safeName(entry.name)+'.png', data: buf});
+      if (i%25===0){
+        zipStatus.textContent = 'Packing '+(i+1)+'/'+entries.length+'\u2026';
+        await new Promise(r=>setTimeout(r,0));
+      }
+    }
+    zipStatus.textContent = 'Zipping\u2026';
+    await new Promise(r=>setTimeout(r,0));
+    const zipBytes = createZip(files);
+    const blob = new Blob([zipBytes], {type:'application/zip'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = currentFileName+'_sprites.zip'; a.click();
+    URL.revokeObjectURL(url);
+    zipStatus.textContent = 'Done \u2014 '+entries.length+' sprites zipped.';
+    zipBtn.disabled = false;
+  }
+
+  // ---------- UI flow ----------
+  function showError(msg){ errorBox.style.display=''; errorBox.textContent = msg; }
+  function clearError(){ errorBox.style.display='none'; errorBox.textContent=''; }
+
+  function reset(){
+    bytes=null; lastDecodeOk=false;
+    filebar.style.display='none';
+    results.style.display='none';
+    xmlRow.style.display='none';
+    spritesPanel.style.display='none';
+    atlasEntries=null;
+    clearError();
+    fileInput.value='';
+    xmlInput.value='';
+  }
+
+  function toUnsignedBytes(signedArr){
+    const out = new Uint8Array(signedArr.length);
+    for (let i=0;i<signedArr.length;i++){ let v=signedArr[i]; if (v<0) v+=256; out[i]=v; }
+    return out;
+  }
+
+  function updateFileBar(textureName, xmlName){
+    let html = '<strong>'+textureName+'</strong>';
+    if (xmlName) html += '<span>+ '+xmlName+'</span>';
+    fileList.innerHTML = html;
+    filebar.style.display='flex';
+  }
+
+  function proceedWithATFBytes(atfBytes, originalName){
+    bytes = atfBytes;
+    results.style.display='';
+    xmlRow.style.display='flex';
+
+    const info = parseHeader(bytes);
+    renderMosaic(bytes);
+    renderHex(bytes, 64);
+
+    if (!info.valid){
+      lastDecodeOk = false;
+      showError(info.error);
+      headerKv.innerHTML = '<dt>signature</dt><dd>not recognized</dd>';
+      widthInput.value = 256; heightInput.value = 256; offsetInput.value = 0;
+      fmtSelect.value = 'rgba';
+      previewStatus.textContent = "Header didn't parse \u2014 set values manually and hit Decode.";
+      return;
+    }
+
+    clearError();
+    headerKv.innerHTML =
+      '<dt>signature</dt><dd>ATF '+(info.isV2?'(v2, length-prefixed)':'(v1, legacy)')+'</dd>' +
+      '<dt>dimensions</dt><dd>'+info.width+' \u00d7 '+info.height+'</dd>' +
+      '<dt>format code</dt><dd>'+info.formatCode+' \u2014 '+info.formatLabel+
+        '<span class="badge '+(info.formatKind==='raw'?'ok':'guess')+'">'+(info.formatKind==='raw'?'likely':'guess')+'</span></dd>' +
+      '<dt>cube map</dt><dd>'+(info.isCubeMap?'yes':'no')+'</dd>' +
+      '<dt>texture/mip count</dt><dd>'+info.numTextures+'</dd>' +
+      '<dt>entry data length</dt><dd>'+fmtBytes(info.entryLength)+'</dd>' +
+      (info.declaredLength!=null ? '<dt>declared length</dt><dd>'+fmtBytes(info.declaredLength)+'</dd>' : '');
+
+    widthInput.value = info.width;
+    heightInput.value = info.height;
+
+    if (info.formatKind === 'raw'){
+      fmtSelect.value = 'bgra';
+      offsetInput.value = info.dataTailOffset;
+    } else {
+      fmtSelect.value = 'etc1dual';
+      offsetInput.value = info.entryDataOffset;
+    }
+
+    runDecode();
+  }
+
+  function loadTextureFile(file){
+    currentFileName = file.name.replace(/\.[^.]+$/, '').replace(/_atf$/i,'').replace(/\.atf$/i,'');
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      const arr = new Uint8Array(e.target.result);
+      if (/\.lzma$/i.test(file.name)){
+        results.style.display='';
+        previewStatus.textContent = 'Decompressing LZMA\u2026';
+        headerKv.innerHTML = '';
+        hexTable.innerHTML = '';
+        window.LZMA.decompress(arr, function(result, err){
+          if (err || !result){
+            showError('LZMA decompression failed: '+(err ? err.message : 'unknown error'));
+            previewStatus.textContent = '';
+            return;
+          }
+          const unsigned = toUnsignedBytes(result);
+          proceedWithATFBytes(unsigned, file.name);
+        });
+      } else {
+        proceedWithATFBytes(arr, file.name);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function loadXmlFile(file){
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      try{
+        atlasEntries = parseAtlasXML(e.target.result);
+        spriteShown = 0;
+        xmlStatus.textContent = file.name+' \u2014 '+atlasEntries.length+' sprite'+(atlasEntries.length===1?'':'s');
+        if (bytes){
+          updateFileBar(fileList.querySelector('strong') ? fileList.querySelector('strong').textContent : currentFileName, file.name);
+        }
+        maybeRenderSprites();
+      } catch(err){
+        atlasEntries = null;
+        spritesPanel.style.display = 'none';
+        xmlStatus.textContent = 'Error parsing '+file.name+': '+err.message;
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function classifyAndLoad(fileArr){
+    const files = Array.from(fileArr);
+    if (!files.length) return;
+    const xmlFile = files.find(f=>/\.xml$/i.test(f.name));
+    const texFile = files.find(f=>f!==xmlFile);
+    if (texFile){
+      reset();
+      updateFileBar(texFile.name, xmlFile ? xmlFile.name : null);
+      loadTextureFile(texFile);
+    }
+    if (xmlFile) loadXmlFile(xmlFile);
+  }
+
+  function runDecode(){
+    if (!bytes) return;
+    let offset = parseInt(offsetInput.value,10) || 0;
+    const width = parseInt(widthInput.value,10);
+    const height = parseInt(heightInput.value,10);
+    const mode = fmtSelect.value;
+
+    previewStatus.textContent = '';
+    downloadBtn.disabled = true;
+    lastDecodeOk = false;
+
+    if (mode === 'unsupported'){
+      previewCanvas.width=4; previewCanvas.height=4;
+      previewStatus.textContent = "This codec isn't pixel-decoded yet \u2014 use the hex view and byte mosaic below.";
+      return;
+    }
+    if (!width || !height){
+      previewStatus.textContent = 'Enter a width and height to decode.';
+      return;
+    }
+
+    try{
+      let img;
+      if (mode==='dxt1') img = decodeDXT(bytes, offset, width, height, false);
+      else if (mode==='dxt5') img = decodeDXT(bytes, offset, width, height, true);
+      else if (mode==='etc1') img = decodeETC1(bytes, offset, width, height, false);
+      else if (mode==='etc1dual') img = decodeETC1(bytes, offset, width, height, true);
+      else img = decodeRaw(bytes, offset, width, height, mode);
+
+      previewCanvas.width = width; previewCanvas.height = height;
+      previewCanvas.getContext('2d').putImageData(img, 0, 0);
+      previewStatus.textContent = width+'\u00d7'+height+' \u00b7 decoded from byte '+offset;
+      downloadBtn.disabled = false;
+      lastDecodeOk = true;
+      maybeRenderSprites();
+    } catch(err){
+      previewCanvas.width=4; previewCanvas.height=4;
+      previewStatus.textContent = err.message;
+    }
+  }
+
+  // events
+  dropzone.addEventListener('click', ()=>fileInput.click());
+  dropzone.addEventListener('keydown', (e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); fileInput.click(); }});
+  ['dragenter','dragover'].forEach(ev=>dropzone.addEventListener(ev, (e)=>{ e.preventDefault(); dropzone.classList.add('drag'); }));
+  ['dragleave','drop'].forEach(ev=>dropzone.addEventListener(ev, (e)=>{ e.preventDefault(); dropzone.classList.remove('drag'); }));
+  dropzone.addEventListener('drop', (e)=>{ classifyAndLoad(e.dataTransfer.files); });
+  fileInput.addEventListener('change', (e)=>{ classifyAndLoad(e.target.files); });
+  xmlInput.addEventListener('change', (e)=>{ if (e.target.files[0]) loadXmlFile(e.target.files[0]); });
+  clearBtn.addEventListener('click', reset);
+  decodeBtn.addEventListener('click', runDecode);
+  moreHexBtn.addEventListener('click', ()=> renderHex(bytes, hexShown+256));
+  spriteFilter.addEventListener('input', ()=> renderSpriteGrid(60));
+  padFrameCheck.addEventListener('change', ()=> renderSpriteGrid(Math.max(60,spriteShown)));
+  spriteMoreBtn.addEventListener('click', ()=> renderSpriteGrid(spriteShown+120));
+  zipBtn.addEventListener('click', downloadAllSprites);
+  downloadBtn.addEventListener('click', ()=>{
+    previewCanvas.toBlob((blob)=>{
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href=url; a.download=currentFileName+'.png'; a.click();
+      URL.revokeObjectURL(url);
+    });
+  });
+})();
+</script>
+</body>
+</html>
