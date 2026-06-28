@@ -161,6 +161,16 @@
   .note{ margin-top:24px; padding:14px 16px; border:1px solid var(--line); background:var(--panel); font-size:12.5px; color:var(--text-dim); line-height:1.6; border-radius:2px; }
   .note strong{color:var(--text);}
 
+  details#advancedDetails{ cursor:default; }
+  details#advancedDetails summary{
+    cursor:pointer; font-family:var(--mono); font-size:12px; letter-spacing:.04em;
+    color:var(--text-dim); list-style:none; outline:none;
+  }
+  details#advancedDetails summary::-webkit-details-marker{ display:none; }
+  details#advancedDetails summary::before{ content:'▸ '; color:var(--amber); }
+  details#advancedDetails[open] summary::before{ content:'▾ '; }
+  details#advancedDetails summary:hover{ color:var(--text); }
+
   @media (prefers-reduced-motion: no-preference){
     .panel, .filebar, .error{animation: rise .22s ease both;}
     @keyframes rise{from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:none;}}
@@ -171,79 +181,32 @@
 <div class="wrap">
   <header class="top">
     <div class="brand">
-      <span class="mark">ATF // INSPECTOR</span>
-      <h1>Adobe Texture Format reader</h1>
+      <span class="mark">ASSET // EXTRACTOR</span>
+      <h1>Sprite atlas extractor</h1>
     </div>
-    <span class="eyebrow">header · pixels · raw bytes · atlas</span>
+    <span class="eyebrow">.lzma + .xml \u2192 PNGs</span>
   </header>
 
-  <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Choose ATF or ATF.LZMA file, optionally with an atlas XML">
+  <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Choose a texture file and its atlas XML">
     <span class="corner tl"></span><span class="corner tr"></span>
     <span class="corner bl"></span><span class="corner br"></span>
-    <div class="dz-label">Drop .atf / .atf.lzma here</div>
-    <div class="dz-sub">drop the XML atlas alongside it too — everything runs in your browser, nothing is uploaded</div>
+    <div class="dz-label">Drop texture + atlas XML here</div>
+    <div class="dz-sub">.atf / .atf.lzma / headerless .raw.lzma, plus the matching .xml \u2014 drop both at once. Runs entirely in your browser.</div>
     <input type="file" id="fileInput" aria-hidden="true" multiple>
   </div>
 
-  <div id="filebar" class="filebar" style="display:none;">
-    <div class="files" id="fileList"></div>
-    <button class="btn ghost" id="clearBtn" type="button">Clear</button>
-  </div>
-
-  <div class="xmlrow" id="xmlRow" style="display:none;">
-    <label class="filelabel" for="xmlInput">+ atlas XML</label>
-    <input type="file" id="xmlInput" accept=".xml" aria-hidden="true">
-    <span id="xmlStatus">no atlas XML loaded — showing single-image preview only</span>
-  </div>
+  <div id="pipelineStatus" class="xmlrow" style="display:none;"></div>
 
   <div id="errorBox" class="error" role="alert" style="display:none;"></div>
 
   <div id="results" style="display:none;">
-    <div class="grid">
-      <div class="panel">
-        <h2>Preview</h2>
-        <canvas id="preview" width="4" height="4"></canvas>
-        <div class="preview-status" id="previewStatus" aria-live="polite">—</div>
-
-        <div class="controls">
-          <div class="row">
-            <label for="fmtSelect">Decode as</label>
-            <select id="fmtSelect"></select>
-          </div>
-          <div class="row">
-            <label for="widthInput">Width</label>
-            <input type="number" id="widthInput" min="1">
-            <label for="heightInput">Height</label>
-            <input type="number" id="heightInput" min="1">
-          </div>
-          <div class="row">
-            <label for="offsetInput">Data offset</label>
-            <input type="number" id="offsetInput" min="0">
-          </div>
-          <div class="row">
-            <button class="btn" id="decodeBtn" type="button">Decode</button>
-            <button class="btn ghost" id="downloadBtn" type="button" disabled>Download PNG</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <h2>Header (best-effort)</h2>
-        <dl class="kv" id="headerKv"></dl>
-
-        <div class="mosaic-row">
-          <canvas id="mosaic" width="110" height="110"></canvas>
-          <div class="mosaic-note">Every byte in the (decompressed) file, plotted as a grayscale pixel — a sanity check that works independently of whether the header above parsed correctly.</div>
-        </div>
-      </div>
-    </div>
 
     <div class="panel" id="spritesPanel" style="display:none;">
-      <h2>Sprites from atlas XML <span class="badge ok" id="spriteBadge"></span></h2>
+      <h2>Extracted sprites <span class="badge ok" id="spriteBadge"></span></h2>
       <div class="sprite-toolbar">
         <input type="text" id="spriteFilter" placeholder="filter by name…">
         <span class="checkrow"><input type="checkbox" id="padFrameCheck" checked> restore full animation frame (frameX/Y/Width/Height)</span>
-        <button class="btn small" id="zipBtn" type="button">Download all as ZIP</button>
+        <button class="btn" id="zipBtn" type="button">Download all as ZIP</button>
       </div>
       <div class="sprite-grid" id="spriteGrid"></div>
       <div class="sprite-footer">
@@ -253,18 +216,77 @@
       </div>
     </div>
 
-    <div class="panel">
-      <h2>Raw bytes</h2>
-      <div class="hex-scroll"><table class="hex" id="hexTable"></table></div>
-      <div class="hex-footer">
-        <span id="hexRange"></span>
-        <button class="btn ghost" id="moreHexBtn" type="button">Show more</button>
+    <details class="panel" id="advancedDetails">
+      <summary>Advanced / troubleshooting \u2014 manual decode controls, header info, hex view</summary>
+
+      <div class="grid" style="margin-top:16px;">
+        <div class="panel">
+          <h2>Preview</h2>
+          <canvas id="preview" width="4" height="4"></canvas>
+          <div class="preview-status" id="previewStatus" aria-live="polite">—</div>
+
+          <div class="controls">
+            <div class="row">
+              <label for="fmtSelect">Decode as</label>
+              <select id="fmtSelect"></select>
+            </div>
+            <div class="row">
+              <label for="widthInput">Width</label>
+              <input type="number" id="widthInput" min="1">
+              <label for="heightInput">Height</label>
+              <input type="number" id="heightInput" min="1">
+            </div>
+            <div class="row" id="mipRow" style="display:none;">
+              <label for="mipInput">Mip level</label>
+              <input type="number" id="mipInput" min="0" value="0">
+              <span class="checkrow" id="mipHint"></span>
+            </div>
+            <div class="row">
+              <label for="offsetInput">Data offset</label>
+              <input type="number" id="offsetInput" min="0">
+            </div>
+            <div class="row">
+              <button class="btn" id="decodeBtn" type="button">Decode</button>
+              <button class="btn ghost" id="downloadBtn" type="button" disabled>Download PNG</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Header (best-effort)</h2>
+          <dl class="kv" id="headerKv"></dl>
+
+          <div class="mosaic-row">
+            <canvas id="mosaic" width="110" height="110"></canvas>
+            <div class="mosaic-note">Every byte in the (decompressed) file, plotted as a grayscale pixel.</div>
+          </div>
+        </div>
       </div>
-    </div>
+
+      <div class="panel">
+        <h2>Raw bytes</h2>
+        <div class="hex-scroll"><table class="hex" id="hexTable"></table></div>
+        <div class="hex-footer">
+          <span id="hexRange"></span>
+          <button class="btn ghost" id="moreHexBtn" type="button">Show more</button>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <div class="xmlrow" id="xmlRow" style="display:none;">
+    <label class="filelabel" for="xmlInput">+ atlas XML</label>
+    <input type="file" id="xmlInput" accept=".xml" aria-hidden="true">
+    <span id="xmlStatus">no atlas XML loaded — showing single-image preview only</span>
+  </div>
+
+  <div id="filebar" class="filebar" style="display:none;">
+    <div class="files" id="fileList"></div>
+    <button class="btn ghost" id="clearBtn" type="button">Clear</button>
   </div>
 
   <div class="note">
-    <strong>About this tool.</strong> ATF header parsing is reconstructed from real sample files rather than official docs, so treat unfamiliar files as best-effort. Verified pixel decoding: raw RGBA/BGRA/RGB/BGR, DXT1/DXT5 (S3TC), and ETC1 — including the dual-plane ETC1 "color + alpha-as-grayscale" convention used by these particular files. PVRTC/ETC2/ASTC are detected but not decoded yet. <code>.atf.lzma</code> files are decompressed automatically (classic LZMA "alone" container) before parsing. Atlas XML support covers the Starling/Sparrow/TexturePacker <code>&lt;SubTexture&gt;</code> format. If anything parses wrong, every value in the Preview panel is manually editable.
+    <strong>About this tool.</strong> Built for the Starling/Sparrow/TexturePacker pipeline: <code>&lt;SubTexture&gt;</code> atlas XML plus a texture that's either an ATF container (raw / DXT1 / DXT5 / ETC1, optionally dual-plane color+alpha) or a headerless raw BGRA mip-chain dump — both auto-detected, with <code>.lzma</code> decompressed automatically. If a file doesn't match either shape, the Advanced panel exposes every value (format, offset, dimensions) for manual correction.
   </div>
 </div>
 
@@ -285,11 +307,15 @@ var e=function(){"use strict";function r(e,r){postMessage({action:nr,cbn:r,resul
   const xmlInput = document.getElementById('xmlInput');
   const xmlStatus = document.getElementById('xmlStatus');
   const errorBox = document.getElementById('errorBox');
+  const pipelineStatus = document.getElementById('pipelineStatus');
   const results = document.getElementById('results');
   const headerKv = document.getElementById('headerKv');
   const fmtSelect = document.getElementById('fmtSelect');
   const widthInput = document.getElementById('widthInput');
   const heightInput = document.getElementById('heightInput');
+  const mipRow = document.getElementById('mipRow');
+  const mipInput = document.getElementById('mipInput');
+  const mipHint = document.getElementById('mipHint');
   const offsetInput = document.getElementById('offsetInput');
   const decodeBtn = document.getElementById('decodeBtn');
   const downloadBtn = document.getElementById('downloadBtn');
@@ -308,11 +334,13 @@ var e=function(){"use strict";function r(e,r){postMessage({action:nr,cbn:r,resul
   const spriteGrid = document.getElementById('spriteGrid');
   const spriteRange = document.getElementById('spriteRange');
   const spriteMoreBtn = document.getElementById('spriteMoreBtn');
+  const advancedDetails = document.getElementById('advancedDetails');
 
   let bytes = null;            // decoded (post-LZMA) ATF bytes
   let currentFileName = 'texture';
   let hexShown = 0;
   let atlasEntries = null;     // parsed <SubTexture> entries from XML
+  let mipChainInfo = null;     // {baseSize, levels} when a headerless mip chain is detected
   let spriteShown = 0;
   let lastDecodeOk = false;
 
@@ -403,6 +431,27 @@ var e=function(){"use strict";function r(e,r){postMessage({action:nr,cbn:r,resul
     info.height = Math.pow(2, heightExp);
     info.numTextures = numTextures;
     return info;
+  }
+
+  // ---------- headerless raw mip-chain detection (no ATF container at all) ----------
+  // Some exported assets are just a straight concatenation of full-res-down-to-1x1
+  // BGRA mip levels with zero header/footer. Detected by exact byte-length match.
+  function detectHeaderlessMipChain(byteLength){
+    for (let base=16; base<=4096; base*=2){
+      let sum=0, d=base;
+      while (true){ sum += d*d; if (d===1) break; d = d>>1; }
+      if (sum*4 === byteLength){
+        let levels=0, dd=base;
+        while (true){ levels++; if (dd===1) break; dd = dd>>1; }
+        return {baseSize: base, levels: levels};
+      }
+    }
+    return null;
+  }
+  function mipLevelInfo(chain, idx){
+    let offset=0, d=chain.baseSize;
+    for (let i=0;i<idx;i++){ offset += d*d*4; d = d>>1; }
+    return {width:d, height:d, offset:offset};
   }
 
   // ---------- raw decode ----------
@@ -758,6 +807,7 @@ var e=function(){"use strict";function r(e,r){postMessage({action:nr,cbn:r,resul
     spritesPanel.style.display = '';
     spriteBadge.textContent = atlasEntries.length+' sprites';
     renderSpriteGrid(Math.max(60, spriteShown||60));
+    setStatus('Done \u2014 '+atlasEntries.length+' sprites extracted.');
   }
 
   async function downloadAllSprites(){
@@ -792,15 +842,22 @@ var e=function(){"use strict";function r(e,r){postMessage({action:nr,cbn:r,resul
   // ---------- UI flow ----------
   function showError(msg){ errorBox.style.display=''; errorBox.textContent = msg; }
   function clearError(){ errorBox.style.display='none'; errorBox.textContent=''; }
+  function setStatus(msg){
+    if (!msg){ pipelineStatus.style.display='none'; return; }
+    pipelineStatus.style.display='flex';
+    pipelineStatus.textContent = msg;
+  }
 
   function reset(){
-    bytes=null; lastDecodeOk=false;
+    bytes=null; lastDecodeOk=false; mipChainInfo=null;
     filebar.style.display='none';
     results.style.display='none';
     xmlRow.style.display='none';
     spritesPanel.style.display='none';
+    mipRow.style.display='none';
     atlasEntries=null;
     clearError();
+    setStatus(null);
     fileInput.value='';
     xmlInput.value='';
   }
@@ -822,22 +879,48 @@ var e=function(){"use strict";function r(e,r){postMessage({action:nr,cbn:r,resul
     bytes = atfBytes;
     results.style.display='';
     xmlRow.style.display='flex';
+    setStatus('Decompressed \u2014 detecting texture format\u2026');
 
     const info = parseHeader(bytes);
     renderMosaic(bytes);
     renderHex(bytes, 64);
 
     if (!info.valid){
+      const chain = detectHeaderlessMipChain(bytes.length);
+      if (chain){
+        mipChainInfo = chain;
+        clearError();
+        setStatus('Detected headerless BGRA mip chain (base '+chain.baseSize+'\u00d7'+chain.baseSize+', '+chain.levels+' levels) \u2014 decoding\u2026');
+        headerKv.innerHTML =
+          '<dt>signature</dt><dd>none \u2014 headerless raw pixel dump <span class="badge guess">detected</span></dd>' +
+          '<dt>dimensions (mip 0)</dt><dd>'+chain.baseSize+' \u00d7 '+chain.baseSize+'</dd>' +
+          '<dt>mip levels</dt><dd>'+chain.levels+' (full chain down to 1\u00d71, no gaps)</dd>' +
+          '<dt>channel order</dt><dd>BGRA, uncompressed <span class="badge ok">confirmed on sample files</span></dd>';
+        fmtSelect.value = 'bgra';
+        mipRow.style.display = '';
+        mipInput.max = chain.levels-1;
+        mipInput.value = 0;
+        applyMipLevel(0);
+        runDecode();
+        return;
+      }
+      mipChainInfo = null;
+      mipRow.style.display = 'none';
       lastDecodeOk = false;
+      setStatus(null);
       showError(info.error);
       headerKv.innerHTML = '<dt>signature</dt><dd>not recognized</dd>';
       widthInput.value = 256; heightInput.value = 256; offsetInput.value = 0;
       fmtSelect.value = 'rgba';
       previewStatus.textContent = "Header didn't parse \u2014 set values manually and hit Decode.";
+      advancedDetails.open = true;
       return;
     }
 
+    mipChainInfo = null;
+    mipRow.style.display = 'none';
     clearError();
+    setStatus('Detected ATF container (format '+info.formatCode+') \u2014 decoding\u2026');
     headerKv.innerHTML =
       '<dt>signature</dt><dd>ATF '+(info.isV2?'(v2, length-prefixed)':'(v1, legacy)')+'</dd>' +
       '<dt>dimensions</dt><dd>'+info.width+' \u00d7 '+info.height+'</dd>' +
@@ -862,6 +945,15 @@ var e=function(){"use strict";function r(e,r){postMessage({action:nr,cbn:r,resul
     runDecode();
   }
 
+  function applyMipLevel(idx){
+    if (!mipChainInfo) return;
+    const info = mipLevelInfo(mipChainInfo, idx);
+    widthInput.value = info.width;
+    heightInput.value = info.height;
+    offsetInput.value = info.offset;
+    mipHint.textContent = info.width+'\u00d7'+info.height+' at byte '+info.offset;
+  }
+
   function loadTextureFile(file){
     currentFileName = file.name.replace(/\.[^.]+$/, '').replace(/_atf$/i,'').replace(/\.atf$/i,'');
     const reader = new FileReader();
@@ -869,11 +961,13 @@ var e=function(){"use strict";function r(e,r){postMessage({action:nr,cbn:r,resul
       const arr = new Uint8Array(e.target.result);
       if (/\.lzma$/i.test(file.name)){
         results.style.display='';
+        setStatus('Decompressing LZMA\u2026 (can take a few seconds for larger atlases)');
         previewStatus.textContent = 'Decompressing LZMA\u2026';
         headerKv.innerHTML = '';
         hexTable.innerHTML = '';
         window.LZMA.decompress(arr, function(result, err){
           if (err || !result){
+            setStatus(null);
             showError('LZMA decompression failed: '+(err ? err.message : 'unknown error'));
             previewStatus.textContent = '';
             return;
@@ -955,7 +1049,8 @@ var e=function(){"use strict";function r(e,r){postMessage({action:nr,cbn:r,resul
       previewStatus.textContent = width+'\u00d7'+height+' \u00b7 decoded from byte '+offset;
       downloadBtn.disabled = false;
       lastDecodeOk = true;
-      maybeRenderSprites();
+      if (atlasEntries) maybeRenderSprites();
+      else setStatus('Texture decoded ('+width+'\u00d7'+height+') \u2014 add the atlas XML to extract sprites.');
     } catch(err){
       previewCanvas.width=4; previewCanvas.height=4;
       previewStatus.textContent = err.message;
@@ -972,6 +1067,7 @@ var e=function(){"use strict";function r(e,r){postMessage({action:nr,cbn:r,resul
   xmlInput.addEventListener('change', (e)=>{ if (e.target.files[0]) loadXmlFile(e.target.files[0]); });
   clearBtn.addEventListener('click', reset);
   decodeBtn.addEventListener('click', runDecode);
+  mipInput.addEventListener('change', ()=>{ applyMipLevel(parseInt(mipInput.value,10)||0); runDecode(); });
   moreHexBtn.addEventListener('click', ()=> renderHex(bytes, hexShown+256));
   spriteFilter.addEventListener('input', ()=> renderSpriteGrid(60));
   padFrameCheck.addEventListener('change', ()=> renderSpriteGrid(Math.max(60,spriteShown)));
